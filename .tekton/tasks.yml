@@ -38,3 +38,42 @@ spec:
         python -m pip install --upgrade pip wheel
         pip install -r requirements.txt
         nosetests $(params.args)
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: buildah-task
+spec:
+  params:
+    - name: IMAGE
+      type: string
+      description: The image to build and push.
+    - name: CONTEXT
+      type: string
+      default: .
+      description: Path to the build context.
+  workspaces:
+    - name: source
+  steps:
+    - name: build
+      image: quay.io/buildah/stable:v1.23.3
+      securityContext:
+        privileged: true
+      script: |
+        #!/bin/sh
+        set -e
+        echo "🚀 Building image $(params.IMAGE)"
+        buildah bud --tls-verify=false -f $(workspaces.source.path)/Dockerfile -t $(params.IMAGE) $(params.CONTEXT)
+        echo "✅ Build completed"
+    - name: push
+      image: quay.io/buildah/stable:v1.23.3
+      securityContext:
+        privileged: true
+      script: |
+        #!/bin/sh
+        set -e
+        echo "📤 Pushing image $(params.IMAGE)"
+        buildah push --tls-verify=false $(params.IMAGE)
+        echo "✅ Push completed"
+
