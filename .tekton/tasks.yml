@@ -76,4 +76,32 @@ spec:
         echo "📤 Pushing image $(params.IMAGE)"
         buildah push --tls-verify=false $(params.IMAGE)
         echo "✅ Push completed"
+        
+---
+
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-using-oc
+spec:
+  params:
+    - name: app-name
+      type: string
+    - name: build-image
+      type: string
+  steps:
+    - name: deploy
+      image: 'quay.io/openshift/origin-cli:latest'
+      script: |
+        #!/bin/bash
+        echo "Deploying app $(params.app-name) with image $(params.build-image)"
+
+        oc create deployment $(params.app-name) \
+          --image=$(params.build-image) \
+          --dry-run=client -o yaml | oc apply -f -
+
+        # expose the service so it’s accessible
+        oc expose deployment $(params.app-name) --port=8080 || true
+        oc expose svc/$(params.app-name) || true
+
 
