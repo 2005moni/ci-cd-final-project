@@ -4,16 +4,28 @@ kind: Task
 metadata:
   name: cleanup
 spec:
+  description: This task will clean up a workspace by deleting all the files.
   workspaces:
     - name: source
   steps:
-    - name: cleanup
-      image: alpine:3.14
+    - name: remove
+      image: alpine:3
+      env:
+        - name: WORKSPACE_SOURCE_PATH
+          value: $(workspaces.source.path)
       workingDir: $(workspaces.source.path)
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
       script: |
-        #!/bin/sh
-        echo "Cleaning up workspace..."
-        rm -rf *
+        #!/usr/bin/env sh
+        set -eu
+        echo "Removing all files from ${WORKSPACE_SOURCE_PATH} ..."
+        if [ -d "${WORKSPACE_SOURCE_PATH}" ] ; then
+          rm -rf "${WORKSPACE_SOURCE_PATH:?}"/*
+          rm -rf "${WORKSPACE_SOURCE_PATH}"/.[!.]*
+          rm -rf "${WORKSPACE_SOURCE_PATH}"/..?*
+        fi
 
 ---
 apiVersion: tekton.dev/v1beta1
@@ -38,70 +50,3 @@ spec:
         python -m pip install --upgrade pip wheel
         pip install -r requirements.txt
         nosetests $(params.args)
-
----
-apiVersion: tekton.dev/v1beta1
-kind: Task
-metadata:
-  name: buildah-task
-spec:
-  params:
-    - name: IMAGE
-      type: string
-      description: The image to build and push.
-    - name: CONTEXT
-      type: string
-      default: .
-      description: Path to the build context.
-  workspaces:
-    - name: source
-  steps:
-    - name: build
-      image: quay.io/buildah/stable:v1.23.3
-      securityContext:
-        privileged: true
-      script: |
-        #!/bin/sh
-        set -e
-        echo "🚀 Building image $(params.IMAGE)"
-        buildah bud --tls-verify=false -f $(workspaces.source.path)/Dockerfile -t $(params.IMAGE) $(params.CONTEXT)
-        echo "✅ Build completed"
-    - name: push
-      image: quay.io/buildah/stable:v1.23.3
-      securityContext:
-        privileged: true
-      script: |
-        #!/bin/sh
-        set -e
-        echo "📤 Pushing image $(params.IMAGE)"
-        buildah push --tls-verify=false $(params.IMAGE)
-        echo "✅ Push completed"
-        
----
-
-apiVersion: tekton.dev/v1beta1
-kind: Task
-metadata:
-  name: deploy-using-oc
-spec:
-  params:
-    - name: app-name
-      type: string
-    - name: build-image
-      type: string
-  steps:
-    - name: deploy
-      image: 'quay.io/openshift/origin-cli:latest'
-      script: |
-        #!/bin/bash
-        echo "Deploying app $(params.app-name) with image $(params.build-image)"
-
-        oc create deployment $(params.app-name) \
-          --image=$(params.build-image) \
-          --dry-run=client -o yaml | oc apply -f -
-
-        # expose the service so it’s accessible
-        oc expose deployment $(params.app-name) --port=8080 || true
-        oc expose svc/$(params.app-name) || true
-
-
